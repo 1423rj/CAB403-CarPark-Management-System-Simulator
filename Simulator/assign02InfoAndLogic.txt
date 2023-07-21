@@ -1,0 +1,199 @@
+                    ----- Threads -----
+1 THREAD dedicated to making new cars and adding them onto an entrance
+1 THREAD per entrance (5 THREADS) facilitating the LPR, Boom Gate and Level Assigning.
+1 THREAD per exit (5 THREADS) facilitatin the LPR and Boom Gate
+
+
+                    ----- Manager -----
+i.      Monitor the status of the License Plate Readers.
+ii.     Keep track of where each car is in the car park.
+iii.    Tell boom gates when to open.
+iv.     Tell boom gates when to close.
+v.      Control what is displayed on the information signs at each entrance.
+vi.     Ensure there is room in the car park before allowing a new vehicle in i.e. (total_cars < total_levels * cars_per_level).
+vii.    Track capacity of levels.
+viii.   Direct cars to levels that are not at max_capacity.
+ix.     Track how long each car has been in the car_park.
+x.      Bill the car upon exit of the car_park (0.05 x (1000 x seconds))
+xi.     Display the current status of the parking lot on a frequently updating command-line.
+        - How full each level is e.g. 1/20.
+        - Current status of boom gates (0 = closed 1 = open)
+        - Signs
+
+
+                    ----- Simulator -----
+i.      Simulates cars
+        - Simulated car recieves a random license Plate
+        - Simulated car queues at a random entry
+        - Entry LPR triggered when car reaches front of queue
+        - Car waits for entry sign
+        - Information sign displays a level
+        - Car remembers displayed level
+        - Car waits for entry boom gate to open
+        - Boom gate opens
+        - Car moves to remembered level
+        - Level LPR is triggered
+        - Car waits for random amount of time.
+        - Car wait time expired level LPR triggered
+        - Random exit picked
+        - Car moves to picked exit
+        - Exit LPR triggered
+        - Car waits for exit boom gate to open
+        - Exit boom gate opens
+        - Car removed from simulation
+
+ii.     Simulate boom gates
+        - Simulator recieves message from manager to put boom gate in Open or Closed state
+        - Simulator waits a small amount of time
+        - Simulator puts boom gate in Open or Closed state.
+
+iii.    Simulate temperature
+        - Each level of the car park has a temperature sensor
+        - Simulator picks reasonable random temperature value for each temperature sensor
+        - Simulator sends back temperature values
+        - Simulator generates higher temperature values
+        - Simulator sends back higher temperature values (to trigger fire alarm system in fire alarm program)
+
+
+                    ----- Fire Alarm -----
+i.      Monitor the status of temperature sensors on each car park level.
+ii.     Detect a fire
+        - activate all fire alarms
+        - open all boom gates
+        - display evacuation message on information signs
+
+
+                    ----- Simulator Timings -----
+Car     Generated with a random license plate: 1-100ms
+        Reaches front of entry Queue, waits before triggering entry LPR: 2ms
+        Driving to parking space: 10ms
+        Parked: 100-10000ms
+        Driving to random exit: 10ms
+
+Boom gate   Reach open state: 10ms
+            Reach close state: 10ms
+
+temperature     Change to random temperature value on each level: 1-5ms
+
+
+                    ----- Manager Timings -----
+Boom gate   After reaching open state wait before starting to reach close state: 20ms
+            Cars will move in to the car park withing these 20ms.
+            Cars can not enter once boom gate has started closing.
+            Cars must wait until close state is reached and then open state is reached again before entering again.
+
+Billing     Cars are billed dependant on the amount of time spent in the car park
+
+
+                    ----- Billing -----
+Cars are billed 5 cents (0.05 dollars) for every 1 millisecond (0.001 seconds) spent in the car park.
+Time spent in the car park is calculated by:
+    Time spent from triggering entrance LPR to triggering exit LPR
+                            =
+    Driving to parking space + Parked + Driving to exit
+
+This billing value is generated upon a car triggering the exit LPR.
+The manager writes these billing values to a file named billing.text, one line at a time.
+billing.text is created if it does not already exist.
+billing.text must be opened in append mode.
+
+
+                    ----- Shared Memory Process -----
+1.      The thread waiting on a value first acquires the mutex associated with that value.
+2.      The threade then waits on the associated condition variable, passing the mutex as the second parameter, unlocking the mutex while the thread is waiting.
+3.      Once the value has been changed and the condition variable broadcast to, the thread will wake up, re-acquire the mutex and check the value again, before deciding to continue waiting or not.
+4.      Finally the thread will unlock the mutex and continue.
+
+
+                    ----- LPR Process -----
+1.      Car passes LPR
+2.      Car license plate written to 6 character long license plate field in the LPR
+3.      LPR condition variable is signalled.
+4.      Mutex used to protect license plate data against concurrent processes.
+
+                    ----- Boom Gate Values -----
+Only 4 acceptable values:
+C   -   Closed  :   default value.
+O   -   Open    :   Cars can only pass through the boom gate while it is open.
+R   -   Raising :   Boom gate is currently in the process of being raised.
+                    - Manager sets the status character to R and signals the condition variable.
+                    - Simulator will then set the status character to O after 10ms.
+L   -   Lowering:   Boom gate is currently in the process of being lowered.
+                    - Manager sets the status character to L and signals the condition variable.
+                    - Simulator will then set the status character to C after 10ms.
+
+Only acceptable status changes:
+manager:
+C   ->  R
+O   ->  L
+simulator:
+R   ->  O
+L   ->  C
+
+
+                    ----- Information Sign -----
+Used to show information at various points.
+Room for only a single character.
+To display a new character on the sign, the display character is set and the condition variable broadcast to (informing any processes waiting for the sign to change).
+i.      When a driver arrives at the entry boom gate and triggers the entry LPR
+        - Sign will show a character between "1" and "5" to indicate level.
+ii.     If the car is unable to access the car park due to the license plate not being recognised.
+        - Sign will show "X"
+iii.    If the car is unable to access the car park due to the car park being full.
+        - Sign will show "F"
+iv.     If a fire is noticed
+        - Sign will cycle through the characters "E", "V", "A", "C", "U", "A", "T", "E", " "
+        - Spending 20ms on each character
+        - Looping back to the first "E" after space character " "
+
+
+                    ----- Per-level Temperature Sensor -----
+2 bytes - signed 16-bit integer representing the current temperature detected on the level.
+Written by the simulator.
+Writes need to be atomic.
+The 'volatile' keyword should be used to ensure that reads and writes reflect true contents of the shared memory segment.
+Read by the fire alarm system.
+There is no mutex protecting this value.
+
+
+                    ----- Per-level Alarm -----
+1 byte - value of 0 or 1.
+0 is default (alarm off).
+1 is fire alarm on.
+Written by the fire alarm system.
+There is no mutex protecting this value.
+
+
+                    ----- Status Display -----
+Manager's terminal displays a status display (text mode).
+Status Display shows the current status of the car park.
+Status Display updates every 50ms.
+Status Display should fit into a single screen.
+Before printing current status the screen should be cleared using system("clear")
+i.      State of each LPR
+ii.     State of each boom gate.
+iii.    State of each digital sign.
+iv.     State of each temperature Sensor.
+v.      Number of vehicles in each level.
+vi.     Max capacity of each level.
+vii.    Total billing revenue recorded by the manager so far.
+
+
+
+
+
+                    ----- Step-by-Step Logic -----
+1.      Simulator creates shared memory segment named PARKING (2920 bytes in size).
+        - If PARKING already exists create again and overwrite.
+        - Initialise mutexs and condition variables within the shared memory segment PARKING.
+        - mutexs and condition variables need to be process shared using pthread_mutexattr_setpshared() and pthread_condattr_setpshared().
+2.      Manager opens shared memory segment PARKING.
+        - Prints error if not present.
+3.      FireAlarm opens shared memory segment PARKING.
+        - Prints error if not present.
+4.      
+                    
+                    ----- Other Logic -----
+Constants / preprocessor #defines must be included to allow different car park configurations.
+
+
